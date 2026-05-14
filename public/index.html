@@ -6,6 +6,7 @@
 <link rel="manifest" href="/manifest.json">
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Sora',sans-serif;background:#f0f4f8;color:#1a2332;height:100vh;overflow:hidden}
@@ -1358,15 +1359,22 @@ function renderCompras(){
   S.kits.forEach(function(k){allOpts.push({value:'kit-'+k.id,label:'🎁 '+k.name});});
   S.books.forEach(function(b){allOpts.push({value:b.id,label:'📚 '+b.title});});
 
-  // Compute totals (books only — kits explode into components)
+  // Compute totals and origins (books only — kits explode into components)
   var totals={};
+  var origins={}; // bookId -> [{kitName, qty}]
   window._compraItems.forEach(function(item){
     if(item.isKit){
       var kid=item.id.replace('kit-','');
       var kit=S.kits.find(function(k){return k.id===kid;});
-      if(kit){kit.items.forEach(function(ci){totals[ci.bookId]=(totals[ci.bookId]||0)+ci.quantity*item.qty;});}
+      if(kit){kit.items.forEach(function(ci){
+        totals[ci.bookId]=(totals[ci.bookId]||0)+ci.quantity*item.qty;
+        if(!origins[ci.bookId])origins[ci.bookId]=[];
+        origins[ci.bookId].push({kitName:item.label.replace(/^🎁 /,''),qty:ci.quantity*item.qty});
+      });}
     } else {
       totals[item.id]=(totals[item.id]||0)+item.qty;
+      if(!origins[item.id])origins[item.id]=[];
+      origins[item.id].push({kitName:'Direto',qty:item.qty});
     }
   });
   var hasItems=Object.keys(totals).length>0;
@@ -1375,23 +1383,6 @@ function renderCompras(){
   var itemRows=window._compraItems.map(function(item,idx){
     var isKit=item.isKit;
     var sub='';
-    if(isKit){
-      var kid=item.id.replace('kit-','');
-      var kit=S.kits.find(function(k){return k.id===kid;});
-      if(kit&&kit.items&&kit.items.length){
-        sub='<div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">'
-          +kit.items.map(function(ci){
-            var b=S.books.find(function(bk){return bk.id===ci.bookId;});
-            if(!b)return'';
-            return'<div style="font-size:12px;color:var(--sub);display:flex;align-items:center;gap:6px">'
-              +'<span style="color:#94a3b8;font-size:10px">▸</span>'
-              +'<span>'+b.title+'</span>'
-              +'<span style="background:#e0e7ff;color:#4f46e5;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:600">×'+(ci.quantity*item.qty)+'</span>'
-              +'</div>';
-          }).filter(Boolean).join('')
-          +'</div>';
-      }
-    }
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#f8fafc;border-radius:8px;margin-bottom:6px">'
       +'<div style="flex:1"><span style="font-size:13px;font-weight:500">'+item.label+'</span>'+sub+'</div>'
       +'<div style="display:flex;align-items:center;gap:6px">'
@@ -1414,10 +1405,14 @@ function renderCompras(){
     +'</div>'
     +(hasItems
       ?'<div class="card">'
-        +'<div style="font-size:13px;font-weight:600;margin-bottom:12px">📋 Livros Necessários</div>'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+        +'<div style="font-size:13px;font-weight:600">📋 Livros Necessários</div>'
+        +'<button class="btn btn-sm" onclick="exportComprasXLSX()" style="font-size:12px;padding:6px 12px">⬇ Exportar XLSX</button>'
+        +'</div>'
         +'<table style="width:100%;border-collapse:collapse;font-size:13px">'
         +'<thead><tr style="background:#f8fafc;border-bottom:2px solid var(--border)">'
         +'<th style="padding:10px 14px;text-align:left">Livro</th>'
+        +'<th style="padding:10px 14px;text-align:left">Origem</th>'
         +'<th style="padding:10px 14px;text-align:center">Necessário</th>'
         +'<th style="padding:10px 14px;text-align:center">Em Estoque</th>'
         +'<th style="padding:10px 14px;text-align:center">A Comprar</th>'
@@ -1428,8 +1423,12 @@ function renderCompras(){
           var b=S.books.find(function(bk){return bk.id===bookId;});if(!b)return'';
           var toComprar=Math.max(0,needed-b.stock);
           var effCost=(b.costPrice||0)+(b.freightUSA!=null?b.freightUSA:5.50);
+          var origList=(origins[bookId]||[]).map(function(o){
+            return'<div style="font-size:11px;color:var(--sub);white-space:nowrap">'+o.kitName+' <span style="background:#e0e7ff;color:#4f46e5;border-radius:4px;padding:1px 5px;font-weight:600">×'+o.qty+'</span></div>';
+          }).join('');
           return'<tr style="border-bottom:1px solid #f1f5f9">'
             +'<td style="padding:10px 14px;font-weight:500">'+b.title+'<div style="font-size:11px;color:var(--sub)">'+b.author+'</div></td>'
+            +'<td style="padding:10px 14px">'+origList+'</td>'
             +'<td style="padding:10px 14px;text-align:center"><span class="badge badge-indigo">'+needed+'</span></td>'
             +'<td style="padding:10px 14px;text-align:center"><span class="badge '+(b.stock>=needed?'badge-green':b.stock>0?'badge-amber':'badge-red')+'">'+b.stock+'</span></td>'
             +'<td style="padding:10px 14px;text-align:center"><span class="badge '+(toComprar>0?'badge-red':'badge-green')+'">'+toComprar+'</span></td>'
@@ -1437,7 +1436,7 @@ function renderCompras(){
             +'</tr>';
         }).join('')
         +'<tr style="background:#f8fafc;border-top:2px solid var(--border);font-weight:600">'
-        +'<td colspan="4" style="padding:10px 14px">Total estimado</td>'
+        +'<td colspan="5" style="padding:10px 14px">Total estimado</td>'
         +'<td style="padding:10px 14px;text-align:right">'+BRL(Object.entries(totals).reduce(function(acc,entry){
           var bookId=entry[0],needed=entry[1];
           var b=S.books.find(function(bk){return bk.id===bookId;});if(!b)return acc;
@@ -1447,6 +1446,42 @@ function renderCompras(){
         +'</tr></tbody></table></div>'
       :(window._compraItems.length>0?'':''));
 }
+
+window.exportComprasXLSX=function(){
+  var S=window.state;
+  var totals={};var origins={};
+  (window._compraItems||[]).forEach(function(item){
+    if(item.isKit){
+      var kid=item.id.replace('kit-','');
+      var kit=S.kits.find(function(k){return k.id===kid;});
+      if(kit){kit.items.forEach(function(ci){
+        totals[ci.bookId]=(totals[ci.bookId]||0)+ci.quantity*item.qty;
+        if(!origins[ci.bookId])origins[ci.bookId]=[];
+        origins[ci.bookId].push(item.label.replace(/^🎁 /,'')+' ×'+(ci.quantity*item.qty));
+      });}
+    } else {
+      totals[item.id]=(totals[item.id]||0)+item.qty;
+      if(!origins[item.id])origins[item.id]=[];
+      origins[item.id].push('Direto ×'+item.qty);
+    }
+  });
+  var rows=[['Livro','Autor','Origem','Necessário','Em Estoque','A Comprar','Custo Unit. (US$)','Custo Est. (US$)']];
+  var totalCost=0;
+  Object.entries(totals).forEach(function(entry){
+    var bookId=entry[0],needed=entry[1];
+    var b=S.books.find(function(bk){return bk.id===bookId;});if(!b)return;
+    var toComprar=Math.max(0,needed-b.stock);
+    var effCost=(b.costPrice||0)+(b.freightUSA!=null?b.freightUSA:5.50);
+    var custo=toComprar>0?toComprar*effCost:0;
+    totalCost+=custo;
+    rows.push([b.title,b.author||'',(origins[bookId]||[]).join(' | '),needed,b.stock,toComprar,effCost,custo>0?custo:0]);
+  });
+  rows.push(['','','','','','','Total',totalCost]);
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Lista de Compras');
+  XLSX.writeFile(wb,'lista-compras-'+new Date().toISOString().slice(0,10)+'.xlsx');
+};
 
 function renderPage(p){
   const map={dashboard:renderDashboard,livros:renderLivros,movimentos:window.renderMovimentos,kits:window.renderKits,clientes:renderClientes,fornecedores:renderFornecedores,despesas:renderDespesas,relatorios:renderRelatorios,ugc:renderUgc,config:renderConfig,compras:renderCompras};
